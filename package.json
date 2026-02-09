@@ -1,0 +1,12 @@
+{
+  "name": "study-shorts-n8n",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "n8nctl": "node /Users/ys-m4pro/dev/study-shorts-n8n/scripts/n8nctl.mjs"
+  },
+  "dependencies": {
+    "dotenv": "^16.4.5"
+  }
+}
