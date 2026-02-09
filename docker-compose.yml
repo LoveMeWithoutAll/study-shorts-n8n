@@ -11,12 +11,53 @@ services:
       - N8N_USER_MANAGEMENT_DISABLED=false
       - TZ=Asia/Seoul
       - N8N_DEFAULT_TIMEZONE=Asia/Seoul
+      - N8N_LOG_LEVEL=info
+      - N8N_BLOCK_ENV_ACCESS_IN_NODE=false
+      - N8N_RESTRICT_FILE_ACCESS_TO=/data;/runs
+      - NODE_FUNCTION_ALLOW_BUILTIN=fs,path
+      # AWS/SQS settings for the workflow
+      - AWS_REGION=ap-northeast-2
+      - SQS_QUEUE_URL=https://sqs.ap-northeast-2.amazonaws.com/092426855146/study-shorts-092426855146-ap-northeast-2-events
       # Optional: Set a basic auth or other auth if needed
       # - N8N_BASIC_AUTH_ACTIVE=true
       # - N8N_BASIC_AUTH_USER=admin
       # - N8N_BASIC_AUTH_PASSWORD=admin
     volumes:
       - n8n_data:/home/node/.n8n
+      - ./data:/data
+      - ./runs:/runs
+      - ./workflows/exports:/workflows/exports
+    restart: unless-stopped
+    depends_on:
+      - whisper_api
+      - media_worker
+
+  whisper_api:
+    build:
+      context: ./services/whisper_api
+      dockerfile: Dockerfile
+    ports:
+      - "9000:9000"
+    environment:
+      - WHISPER_MODEL=medium
+      - WHISPER_COMPUTE_TYPE=int8
+      - WHISPER_LANGUAGE=ko
+      - WHISPER_BEAM_SIZE=5
+      - WHISPER_VAD_FILTER=true
+    volumes:
+      - ./data:/data
+    restart: unless-stopped
+
+  media_worker:
+    build:
+      context: ./services/media_worker
+      dockerfile: Dockerfile
+    ports:
+      - "9001:9001"
+    environment:
+      - MEDIA_FONT=Noto Sans CJK KR
+    volumes:
+      - ./data:/data
     restart: unless-stopped
 
 volumes:
