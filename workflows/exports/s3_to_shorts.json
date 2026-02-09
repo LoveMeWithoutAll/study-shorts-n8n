@@ -1,0 +1,1320 @@
+{
+  "updatedAt": "2026-02-09T04:21:05.251Z",
+  "createdAt": "2026-02-09T04:21:05.251Z",
+  "id": "b0b0Z7gt3u1FflIX",
+  "name": "s3_to_shorts",
+  "description": null,
+  "active": true,
+  "isArchived": false,
+  "nodes": [
+    {
+      "parameters": {
+        "rule": {
+          "interval": [
+            {
+              "field": "minutes",
+              "minutesInterval": 1
+            }
+          ]
+        }
+      },
+      "id": "1",
+      "name": "Schedule Trigger",
+      "type": "n8n-nodes-base.scheduleTrigger",
+      "typeVersion": 1.3,
+      "position": [
+        -1200,
+        200
+      ]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "={{$env.SQS_QUEUE_URL}}",
+        "authentication": "predefinedCredentialType",
+        "nodeCredentialType": "aws",
+        "sendQuery": false,
+        "specifyQuery": "keypair",
+        "response": {
+          "response": {
+            "responseFormat": "text",
+            "outputPropertyName": "data"
+          }
+        },
+        "sendBody": true,
+        "contentType": "form-urlencoded",
+        "specifyBody": "keypair",
+        "bodyParameters": {
+          "parameters": [
+            {
+              "name": "Action",
+              "value": "ReceiveMessage"
+            },
+            {
+              "name": "MaxNumberOfMessages",
+              "value": "1"
+            },
+            {
+              "name": "WaitTimeSeconds",
+              "value": "10"
+            },
+            {
+              "name": "VisibilityTimeout",
+              "value": "300"
+            },
+            {
+              "name": "Version",
+              "value": "2012-11-05"
+            }
+          ]
+        }
+      },
+      "id": "2",
+      "name": "SQS Receive",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.4,
+      "position": [
+        -980,
+        200
+      ],
+      "credentials": {
+        "aws": {
+          "id": "HPkYmFKxxGtkpxjo",
+          "name": "AWS (IAM) account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "functionCode": "const resp = $json.ReceiveMessageResponse || $json.data?.ReceiveMessageResponse;\nconst msg = resp?.ReceiveMessageResult?.Message || resp?.ReceiveMessageResult?.messages?.[0];\nif (!msg) {\n  return [];\n}\nconst bodyRaw = msg.Body && typeof msg.Body === 'object' ? (msg.Body._ ?? msg.Body) : msg.Body;\nconst receiptRaw = msg.ReceiptHandle && typeof msg.ReceiptHandle === 'object' ? (msg.ReceiptHandle._ ?? msg.ReceiptHandle) : msg.ReceiptHandle;\nconst parsed = JSON.parse(bodyRaw || '{}');\nconst record = (parsed.Records || [])[0] || {};\nconst bucket = record.s3?.bucket?.name;\nconst key = decodeURIComponent((record.s3?.object?.key || '').replace(/\\+/g, ' '));\nif (!bucket || !key) {\n  throw new Error('Invalid S3 event payload');\n}\nreturn [{ json: { bucket, key, receiptHandle: receiptRaw, rawEvent: parsed } }];"
+      },
+      "id": "4",
+      "name": "Parse SQS Message",
+      "type": "n8n-nodes-base.function",
+      "typeVersion": 2,
+      "position": [
+        -560,
+        200
+      ]
+    },
+    {
+      "parameters": {
+        "functionCode": "const runId = $execution.id;\nconst safeKey = $json.key.replace(/[\\/]/g, '_');\nconst runDir = `/data/runs`;\nconst inputVideoPath = `${runDir}/input_${runId}_${safeKey}`;\nconst srtPath = `${runDir}/full_${runId}.srt`;\nconst metadataPath = `/runs/run-${runId}.json`;\nreturn [{\n  json: {\n    ...$json,\n    runId,\n    runDir,\n    inputVideoPath,\n    srtPath,\n    metadataPath\n  }\n}];"
+      },
+      "id": "3",
+      "name": "Prepare Paths",
+      "type": "n8n-nodes-base.function",
+      "typeVersion": 2,
+      "position": [
+        -760,
+        200
+      ]
+    },
+    {
+      "parameters": {
+        "operation": "download",
+        "bucketName": "={{$json.bucket}}",
+        "fileKey": "={{$json.key}}",
+        "options": {}
+      },
+      "id": "5",
+      "name": "Download S3 Object",
+      "type": "n8n-nodes-base.awsS3",
+      "typeVersion": 1,
+      "position": [
+        -350,
+        200
+      ],
+      "credentials": {
+        "aws": {
+          "id": "HPkYmFKxxGtkpxjo",
+          "name": "AWS (IAM) account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "fileName": "={{$json.inputVideoPath}}",
+        "dataPropertyName": "data"
+      },
+      "id": "6",
+      "name": "Write Input File",
+      "type": "n8n-nodes-base.writeBinaryFile",
+      "typeVersion": 1,
+      "position": [
+        -140,
+        200
+      ]
+    },
+    {
+      "parameters": {
+        "filePath": "={{$json.inputVideoPath}}"
+      },
+      "id": "7",
+      "name": "Read Input For STT",
+      "type": "n8n-nodes-base.readBinaryFile",
+      "typeVersion": 1,
+      "position": [
+        40,
+        200
+      ]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "http://whisper_api:9000/transcribe_path",
+        "sendBody": true,
+        "contentType": "json",
+        "specifyBody": "keypair",
+        "options": {
+          "timeout": 300000
+        },
+        "bodyParameters": {
+          "parameters": [
+            {
+              "name": "input_path",
+              "value": "={{$json.inputVideoPath}}"
+            },
+            {
+              "name": "language",
+              "value": "ko"
+            }
+          ]
+        }
+      },
+      "id": "8",
+      "name": "Whisper STT",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.4,
+      "position": [
+        230,
+        200
+      ]
+    },
+    {
+      "parameters": {
+        "functionCode": "const fs = require('fs');\nconst path = require('path');\nconst target = $json.srtPath;\nfs.mkdirSync(path.dirname(target), { recursive: true });\nfs.writeFileSync(target, $json.srt || '', 'utf8');\nreturn items;"
+      },
+      "id": "9",
+      "name": "Write Full SRT (fs)",
+      "type": "n8n-nodes-base.function",
+      "typeVersion": 2,
+      "position": [
+        430,
+        80
+      ]
+    },
+    {
+      "parameters": {
+        "functionCode": "const segments = $json.segments || [];\nconst maxDuration = 59;\nconst minDuration = 20;\nconst targetDuration = 45;\n\nfunction scoreText(text) {\n  const punct = (text.match(/[?!…]/g) || []).length;\n  return punct + Math.min(text.length / 40, 3);\n}\n\nconst candidates = [];\nlet window = [];\nlet windowStart = null;\nfor (const seg of segments) {\n  if (windowStart === null) windowStart = seg.start;\n  window.push(seg);\n  const duration = seg.end - windowStart;\n  if (duration >= targetDuration || duration >= maxDuration) {\n    const text = window.map(s => s.text).join(' ');\n    candidates.push({\n      start_sec: windowStart,\n      end_sec: seg.end,\n      text,\n      score: scoreText(text)\n    });\n    window = [];\n    windowStart = null;\n  }\n}\nif (window.length) {\n  const text = window.map(s => s.text).join(' ');\n  const end = window[window.length - 1].end;\n  const duration = end - windowStart;\n  if (duration >= minDuration) {\n    candidates.push({\n      start_sec: windowStart,\n      end_sec: end,\n      text,\n      score: scoreText(text)\n    });\n  }\n}\n\nconst picked = candidates\n  .filter(c => c.end_sec - c.start_sec >= minDuration && c.end_sec - c.start_sec <= maxDuration)\n  .sort((a, b) => b.score - a.score)\n  .slice(0, 3);\n\nfunction formatSrtTime(seconds) {\n  const millis = Math.floor(seconds * 1000);\n  const hours = Math.floor(millis / 3600000);\n  const minutes = Math.floor((millis % 3600000) / 60000);\n  const secs = Math.floor((millis % 60000) / 1000);\n  const ms = millis % 1000;\n  return `${hours.toString().padStart(2,'0')}:${minutes.toString().padStart(2,'0')}:${secs.toString().padStart(2,'0')},${ms.toString().padStart(3,'0')}`;\n}\n\nfunction buildSrt(start, end) {\n  let idx = 1;\n  const lines = [];\n  for (const seg of segments) {\n    if (seg.end <= start || seg.start >= end) continue;\n    const s = Math.max(seg.start, start) - start;\n    const e = Math.min(seg.end, end) - start;\n    lines.push(String(idx++));\n    lines.push(`${formatSrtTime(s)} --> ${formatSrtTime(e)}`);\n    lines.push(seg.text.trim());\n    lines.push('');\n  }\n  return lines.join('\\n').trim() + '\\n';\n}\n\nreturn picked.map((h, index) => {\n  const title = h.text.slice(0, 50).trim();\n  const hook_text = h.text.slice(0, 80).trim();\n  const highlightSrt = buildSrt(h.start_sec, h.end_sec);\n  const base = `${$json.runDir}/highlight_${$json.runId}_${index + 1}`;\n  return {\n    json: {\n      ...$json,\n      highlight: {\n        start_sec: h.start_sec,\n        end_sec: h.end_sec,\n        title,\n        hook_text\n      },\n      highlightSrt,\n      highlightSrtPath: `${base}.srt`,\n      outputVideoPath: `${base}.mp4`,\n      thumbnailPath: `${base}.jpg`,\n      thumbTimeSec: h.start_sec + (h.end_sec - h.start_sec) * 0.2\n    }\n  };\n});"
+      },
+      "id": "11",
+      "name": "Select Highlights",
+      "type": "n8n-nodes-base.function",
+      "typeVersion": 2,
+      "position": [
+        640,
+        200
+      ]
+    },
+    {
+      "parameters": {
+        "functionCode": "const fs = require('fs');\nconst path = require('path');\nconst target = $json.highlightSrtPath;\nfs.mkdirSync(path.dirname(target), { recursive: true });\nfs.writeFileSync(target, $json.highlightSrt || '', 'utf8');\nreturn items;"
+      },
+      "id": "12",
+      "name": "Write Highlight SRT (fs)",
+      "type": "n8n-nodes-base.function",
+      "typeVersion": 2,
+      "position": [
+        860,
+        200
+      ]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "http://media_worker:9001/render_short",
+        "sendBody": true,
+        "specifyBody": "keypair",
+        "options": {
+          "timeout": 300000
+        },
+        "contentType": "json",
+        "bodyParameters": {
+          "parameters": [
+            {
+              "name": "input_path",
+              "value": "={{$json.inputVideoPath}}"
+            },
+            {
+              "name": "srt_path",
+              "value": "={{$json.highlightSrtPath}}"
+            },
+            {
+              "name": "output_path",
+              "value": "={{$json.outputVideoPath}}"
+            },
+            {
+              "name": "start_sec",
+              "value": "={{$json.highlight.start_sec}}"
+            },
+            {
+              "name": "end_sec",
+              "value": "={{$json.highlight.end_sec}}"
+            }
+          ]
+        }
+      },
+      "id": "14",
+      "name": "FFmpeg Shorts",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.4,
+      "position": [
+        1300,
+        200
+      ]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "http://media_worker:9001/thumbnail",
+        "sendBody": true,
+        "specifyBody": "keypair",
+        "options": {
+          "timeout": 120000
+        },
+        "contentType": "json",
+        "bodyParameters": {
+          "parameters": [
+            {
+              "name": "input_path",
+              "value": "={{$json.outputVideoPath}}"
+            },
+            {
+              "name": "output_path",
+              "value": "={{$json.thumbnailPath}}"
+            },
+            {
+              "name": "time_sec",
+              "value": "={{$json.thumbTimeSec}}"
+            },
+            {
+              "name": "text",
+              "value": "={{$json.highlight.hook_text}}"
+            }
+          ]
+        }
+      },
+      "id": "15",
+      "name": "Thumbnail",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.4,
+      "position": [
+        1520,
+        200
+      ]
+    },
+    {
+      "parameters": {
+        "functionCode": "const payload = {\n  runId: $json.runId,\n  bucket: $json.bucket,\n  key: $json.key,\n  highlight: $json.highlight,\n  outputVideoPath: $json.outputVideoPath,\n  thumbnailPath: $json.thumbnailPath,\n  createdAt: new Date().toISOString()\n};\nreturn [{ json: { ...$json, metadata: JSON.stringify(payload, null, 2) } }];"
+      },
+      "id": "20",
+      "name": "Build Metadata",
+      "type": "n8n-nodes-base.function",
+      "typeVersion": 2,
+      "position": [
+        2600,
+        200
+      ]
+    },
+    {
+      "parameters": {
+        "functionCode": "const fs = require('fs');\nconst path = require('path');\nconst target = $json.metadataPath;\nfs.mkdirSync(path.dirname(target), { recursive: true });\nfs.writeFileSync(target, $json.metadata || '', 'utf8');\nreturn items;"
+      },
+      "id": "21",
+      "name": "Write Metadata (fs)",
+      "type": "n8n-nodes-base.function",
+      "typeVersion": 2,
+      "position": [
+        2800,
+        200
+      ]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "={{$env.SQS_QUEUE_URL}}",
+        "authentication": "predefinedCredentialType",
+        "nodeCredentialType": "aws",
+        "sendQuery": false,
+        "specifyQuery": "keypair",
+        "response": {
+          "response": {
+            "responseFormat": "text",
+            "outputPropertyName": "data"
+          }
+        },
+        "sendBody": true,
+        "contentType": "form-urlencoded",
+        "specifyBody": "keypair",
+        "bodyParameters": {
+          "parameters": [
+            {
+              "name": "Action",
+              "value": "DeleteMessage"
+            },
+            {
+              "name": "ReceiptHandle",
+              "value": "={{$json.receiptHandle}}"
+            },
+            {
+              "name": "Version",
+              "value": "2012-11-05"
+            }
+          ]
+        }
+      },
+      "id": "23",
+      "name": "SQS Delete",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.4,
+      "position": [
+        3220,
+        200
+      ],
+      "credentials": {
+        "aws": {
+          "id": "HPkYmFKxxGtkpxjo",
+          "name": "AWS (IAM) account"
+        }
+      }
+    },
+    {
+      "id": "30",
+      "name": "Merge STT",
+      "type": "n8n-nodes-base.merge",
+      "typeVersion": 3,
+      "position": [
+        430,
+        200
+      ],
+      "parameters": {
+        "mode": "combine",
+        "combineBy": "combineByPosition",
+        "numberInputs": 2
+      }
+    },
+    {
+      "id": "31",
+      "name": "Merge Media",
+      "type": "n8n-nodes-base.merge",
+      "typeVersion": 3,
+      "position": [
+        1500,
+        80
+      ],
+      "parameters": {
+        "mode": "combine",
+        "combineBy": "combineByPosition",
+        "numberInputs": 2
+      }
+    },
+    {
+      "id": "32",
+      "name": "Merge Thumb",
+      "type": "n8n-nodes-base.merge",
+      "typeVersion": 3,
+      "position": [
+        1700,
+        80
+      ],
+      "parameters": {
+        "mode": "combine",
+        "combineBy": "combineByPosition",
+        "numberInputs": 2
+      }
+    }
+  ],
+  "connections": {
+    "Schedule Trigger": {
+      "main": [
+        [
+          {
+            "node": "SQS Receive",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "SQS Receive": {
+      "main": [
+        [
+          {
+            "node": "Parse SQS Message",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Parse SQS Message": {
+      "main": [
+        [
+          {
+            "node": "Prepare Paths",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Prepare Paths": {
+      "main": [
+        [
+          {
+            "node": "Download S3 Object",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Download S3 Object": {
+      "main": [
+        [
+          {
+            "node": "Write Input File",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Write Input File": {
+      "main": [
+        [
+          {
+            "node": "Read Input For STT",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Read Input For STT": {
+      "main": [
+        [
+          {
+            "node": "Whisper STT",
+            "type": "main",
+            "index": 0
+          },
+          {
+            "node": "Merge STT",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Whisper STT": {
+      "main": [
+        [
+          {
+            "node": "Merge STT",
+            "type": "main",
+            "index": 1
+          }
+        ]
+      ]
+    },
+    "Select Highlights": {
+      "main": [
+        [
+          {
+            "node": "Write Highlight SRT (fs)",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "FFmpeg Shorts": {
+      "main": [
+        [
+          {
+            "node": "Merge Media",
+            "type": "main",
+            "index": 1
+          }
+        ]
+      ]
+    },
+    "Thumbnail": {
+      "main": [
+        [
+          {
+            "node": "Merge Thumb",
+            "type": "main",
+            "index": 1
+          }
+        ]
+      ]
+    },
+    "Build Metadata": {
+      "main": [
+        [
+          {
+            "node": "Write Metadata (fs)",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Write Highlight SRT (fs)": {
+      "main": [
+        [
+          {
+            "node": "FFmpeg Shorts",
+            "type": "main",
+            "index": 0
+          },
+          {
+            "node": "Merge Media",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Write Metadata (fs)": {
+      "main": [
+        [
+          {
+            "node": "SQS Delete",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Merge STT": {
+      "main": [
+        [
+          {
+            "node": "Write Full SRT (fs)",
+            "type": "main",
+            "index": 0
+          },
+          {
+            "node": "Select Highlights",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Merge Media": {
+      "main": [
+        [
+          {
+            "node": "Thumbnail",
+            "type": "main",
+            "index": 0
+          },
+          {
+            "node": "Merge Thumb",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Merge Thumb": {
+      "main": [
+        [
+          {
+            "node": "Build Metadata",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "settings": {
+    "executionOrder": "v1",
+    "callerPolicy": "workflowsFromSameOwner",
+    "availableInMCP": false
+  },
+  "staticData": {
+    "node:Schedule Trigger": {
+      "recurrenceRules": []
+    }
+  },
+  "meta": null,
+  "pinData": null,
+  "versionId": "b002a00f-cef4-4aaf-a9d2-02bcaccbe704",
+  "activeVersionId": "b002a00f-cef4-4aaf-a9d2-02bcaccbe704",
+  "versionCounter": 5,
+  "triggerCount": 1,
+  "shared": [
+    {
+      "updatedAt": "2026-02-09T04:21:05.256Z",
+      "createdAt": "2026-02-09T04:21:05.256Z",
+      "role": "workflow:owner",
+      "workflowId": "b0b0Z7gt3u1FflIX",
+      "projectId": "B4iVgsF3rix6IcLK",
+      "project": {
+        "updatedAt": "2026-02-09T03:55:19.596Z",
+        "createdAt": "2026-02-09T03:54:00.166Z",
+        "id": "B4iVgsF3rix6IcLK",
+        "name": "youngseon ahn <ys.ahn@outlook.com>",
+        "type": "personal",
+        "icon": null,
+        "description": null,
+        "creatorId": "624d748b-0328-41fc-92ec-b0ae618965a5",
+        "projectRelations": [
+          {
+            "updatedAt": "2026-02-09T03:54:00.166Z",
+            "createdAt": "2026-02-09T03:54:00.166Z",
+            "userId": "624d748b-0328-41fc-92ec-b0ae618965a5",
+            "projectId": "B4iVgsF3rix6IcLK",
+            "user": {
+              "updatedAt": "2026-02-09T04:32:39.000Z",
+              "createdAt": "2026-02-09T03:53:59.916Z",
+              "id": "624d748b-0328-41fc-92ec-b0ae618965a5",
+              "email": "ys.ahn@outlook.com",
+              "firstName": "youngseon",
+              "lastName": "ahn",
+              "personalizationAnswers": null,
+              "settings": {
+                "userActivated": true,
+                "firstSuccessfulWorkflowId": "b0b0Z7gt3u1FflIX",
+                "userActivatedAt": 1770611012027
+              },
+              "disabled": false,
+              "mfaEnabled": false,
+              "lastActiveAt": "2026-02-09",
+              "isPending": false
+            }
+          }
+        ]
+      }
+    }
+  ],
+  "tags": [],
+  "activeVersion": {
+    "updatedAt": "2026-02-09T04:21:05.262Z",
+    "createdAt": "2026-02-09T04:21:05.262Z",
+    "versionId": "b002a00f-cef4-4aaf-a9d2-02bcaccbe704",
+    "workflowId": "b0b0Z7gt3u1FflIX",
+    "nodes": [
+      {
+        "parameters": {
+          "rule": {
+            "interval": [
+              {
+                "field": "minutes",
+                "minutesInterval": 1
+              }
+            ]
+          }
+        },
+        "id": "1",
+        "name": "Schedule Trigger",
+        "type": "n8n-nodes-base.scheduleTrigger",
+        "typeVersion": 1.3,
+        "position": [
+          -1200,
+          200
+        ]
+      },
+      {
+        "parameters": {
+          "method": "POST",
+          "url": "={{$env.SQS_QUEUE_URL}}",
+          "authentication": "predefinedCredentialType",
+          "nodeCredentialType": "aws",
+          "sendQuery": false,
+          "specifyQuery": "keypair",
+          "response": {
+            "response": {
+              "responseFormat": "text",
+              "outputPropertyName": "data"
+            }
+          },
+          "sendBody": true,
+          "contentType": "form-urlencoded",
+          "specifyBody": "keypair",
+          "bodyParameters": {
+            "parameters": [
+              {
+                "name": "Action",
+                "value": "ReceiveMessage"
+              },
+              {
+                "name": "MaxNumberOfMessages",
+                "value": "1"
+              },
+              {
+                "name": "WaitTimeSeconds",
+                "value": "10"
+              },
+              {
+                "name": "VisibilityTimeout",
+                "value": "300"
+              },
+              {
+                "name": "Version",
+                "value": "2012-11-05"
+              }
+            ]
+          }
+        },
+        "id": "2",
+        "name": "SQS Receive",
+        "type": "n8n-nodes-base.httpRequest",
+        "typeVersion": 4.4,
+        "position": [
+          -980,
+          200
+        ],
+        "credentials": {
+          "aws": {
+            "id": "HPkYmFKxxGtkpxjo",
+            "name": "AWS (IAM) account"
+          }
+        }
+      },
+      {
+        "parameters": {
+          "functionCode": "const resp = $json.ReceiveMessageResponse || $json.data?.ReceiveMessageResponse;\nconst msg = resp?.ReceiveMessageResult?.Message || resp?.ReceiveMessageResult?.messages?.[0];\nif (!msg) {\n  return [];\n}\nconst bodyRaw = msg.Body && typeof msg.Body === 'object' ? (msg.Body._ ?? msg.Body) : msg.Body;\nconst receiptRaw = msg.ReceiptHandle && typeof msg.ReceiptHandle === 'object' ? (msg.ReceiptHandle._ ?? msg.ReceiptHandle) : msg.ReceiptHandle;\nconst parsed = JSON.parse(bodyRaw || '{}');\nconst record = (parsed.Records || [])[0] || {};\nconst bucket = record.s3?.bucket?.name;\nconst key = decodeURIComponent((record.s3?.object?.key || '').replace(/\\+/g, ' '));\nif (!bucket || !key) {\n  throw new Error('Invalid S3 event payload');\n}\nreturn [{ json: { bucket, key, receiptHandle: receiptRaw, rawEvent: parsed } }];"
+        },
+        "id": "4",
+        "name": "Parse SQS Message",
+        "type": "n8n-nodes-base.function",
+        "typeVersion": 2,
+        "position": [
+          -560,
+          200
+        ]
+      },
+      {
+        "parameters": {
+          "functionCode": "const runId = $execution.id;\nconst safeKey = $json.key.replace(/[\\/]/g, '_');\nconst runDir = `/data/runs`;\nconst inputVideoPath = `${runDir}/input_${runId}_${safeKey}`;\nconst srtPath = `${runDir}/full_${runId}.srt`;\nconst metadataPath = `/runs/run-${runId}.json`;\nreturn [{\n  json: {\n    ...$json,\n    runId,\n    runDir,\n    inputVideoPath,\n    srtPath,\n    metadataPath\n  }\n}];"
+        },
+        "id": "3",
+        "name": "Prepare Paths",
+        "type": "n8n-nodes-base.function",
+        "typeVersion": 2,
+        "position": [
+          -760,
+          200
+        ]
+      },
+      {
+        "parameters": {
+          "operation": "download",
+          "bucketName": "={{$json.bucket}}",
+          "fileKey": "={{$json.key}}",
+          "options": {}
+        },
+        "id": "5",
+        "name": "Download S3 Object",
+        "type": "n8n-nodes-base.awsS3",
+        "typeVersion": 1,
+        "position": [
+          -350,
+          200
+        ],
+        "credentials": {
+          "aws": {
+            "id": "HPkYmFKxxGtkpxjo",
+            "name": "AWS (IAM) account"
+          }
+        }
+      },
+      {
+        "parameters": {
+          "fileName": "={{$json.inputVideoPath}}",
+          "dataPropertyName": "data"
+        },
+        "id": "6",
+        "name": "Write Input File",
+        "type": "n8n-nodes-base.writeBinaryFile",
+        "typeVersion": 1,
+        "position": [
+          -140,
+          200
+        ]
+      },
+      {
+        "parameters": {
+          "filePath": "={{$json.inputVideoPath}}"
+        },
+        "id": "7",
+        "name": "Read Input For STT",
+        "type": "n8n-nodes-base.readBinaryFile",
+        "typeVersion": 1,
+        "position": [
+          40,
+          200
+        ]
+      },
+      {
+        "parameters": {
+          "method": "POST",
+          "url": "http://whisper_api:9000/transcribe",
+          "sendBinaryData": true,
+          "binaryPropertyName": "data",
+          "options": {
+            "timeout": 300000
+          }
+        },
+        "id": "8",
+        "name": "Whisper STT",
+        "type": "n8n-nodes-base.httpRequest",
+        "typeVersion": 3,
+        "position": [
+          230,
+          200
+        ]
+      },
+      {
+        "parameters": {
+          "operation": "toBinary",
+          "sourceKey": "srt",
+          "destinationKey": "fullsrt"
+        },
+        "id": "9",
+        "name": "Full SRT To Binary",
+        "type": "n8n-nodes-base.moveBinaryData",
+        "typeVersion": 1,
+        "position": [
+          430,
+          80
+        ]
+      },
+      {
+        "parameters": {
+          "fileName": "={{$json.srtPath}}",
+          "dataPropertyName": "fullsrt"
+        },
+        "id": "10",
+        "name": "Write Full SRT",
+        "type": "n8n-nodes-base.writeBinaryFile",
+        "typeVersion": 1,
+        "position": [
+          640,
+          80
+        ]
+      },
+      {
+        "parameters": {
+          "functionCode": "const segments = $json.segments || [];\nconst maxDuration = 59;\nconst minDuration = 20;\nconst targetDuration = 45;\n\nfunction scoreText(text) {\n  const punct = (text.match(/[?!…]/g) || []).length;\n  return punct + Math.min(text.length / 40, 3);\n}\n\nconst candidates = [];\nlet window = [];\nlet windowStart = null;\nfor (const seg of segments) {\n  if (windowStart === null) windowStart = seg.start;\n  window.push(seg);\n  const duration = seg.end - windowStart;\n  if (duration >= targetDuration || duration >= maxDuration) {\n    const text = window.map(s => s.text).join(' ');\n    candidates.push({\n      start_sec: windowStart,\n      end_sec: seg.end,\n      text,\n      score: scoreText(text)\n    });\n    window = [];\n    windowStart = null;\n  }\n}\nif (window.length) {\n  const text = window.map(s => s.text).join(' ');\n  const end = window[window.length - 1].end;\n  const duration = end - windowStart;\n  if (duration >= minDuration) {\n    candidates.push({\n      start_sec: windowStart,\n      end_sec: end,\n      text,\n      score: scoreText(text)\n    });\n  }\n}\n\nconst picked = candidates\n  .filter(c => c.end_sec - c.start_sec >= minDuration && c.end_sec - c.start_sec <= maxDuration)\n  .sort((a, b) => b.score - a.score)\n  .slice(0, 3);\n\nfunction formatSrtTime(seconds) {\n  const millis = Math.floor(seconds * 1000);\n  const hours = Math.floor(millis / 3600000);\n  const minutes = Math.floor((millis % 3600000) / 60000);\n  const secs = Math.floor((millis % 60000) / 1000);\n  const ms = millis % 1000;\n  return `${hours.toString().padStart(2,'0')}:${minutes.toString().padStart(2,'0')}:${secs.toString().padStart(2,'0')},${ms.toString().padStart(3,'0')}`;\n}\n\nfunction buildSrt(start, end) {\n  let idx = 1;\n  const lines = [];\n  for (const seg of segments) {\n    if (seg.end <= start || seg.start >= end) continue;\n    const s = Math.max(seg.start, start) - start;\n    const e = Math.min(seg.end, end) - start;\n    lines.push(String(idx++));\n    lines.push(`${formatSrtTime(s)} --> ${formatSrtTime(e)}`);\n    lines.push(seg.text.trim());\n    lines.push('');\n  }\n  return lines.join('\\n').trim() + '\\n';\n}\n\nreturn picked.map((h, index) => {\n  const title = h.text.slice(0, 50).trim();\n  const hook_text = h.text.slice(0, 80).trim();\n  const highlightSrt = buildSrt(h.start_sec, h.end_sec);\n  const base = `${$json.runDir}/highlight_${$json.runId}_${index + 1}`;\n  return {\n    json: {\n      ...$json,\n      highlight: {\n        start_sec: h.start_sec,\n        end_sec: h.end_sec,\n        title,\n        hook_text\n      },\n      highlightSrt,\n      highlightSrtPath: `${base}.srt`,\n      outputVideoPath: `${base}.mp4`,\n      thumbnailPath: `${base}.jpg`,\n      thumbTimeSec: h.start_sec + (h.end_sec - h.start_sec) * 0.2\n    }\n  };\n});"
+        },
+        "id": "11",
+        "name": "Select Highlights",
+        "type": "n8n-nodes-base.function",
+        "typeVersion": 2,
+        "position": [
+          640,
+          200
+        ]
+      },
+      {
+        "parameters": {
+          "operation": "toBinary",
+          "sourceKey": "highlightSrt",
+          "destinationKey": "srt"
+        },
+        "id": "12",
+        "name": "SRT To Binary",
+        "type": "n8n-nodes-base.moveBinaryData",
+        "typeVersion": 1,
+        "position": [
+          860,
+          200
+        ]
+      },
+      {
+        "parameters": {
+          "fileName": "={{$json.highlightSrtPath}}",
+          "dataPropertyName": "srt"
+        },
+        "id": "13",
+        "name": "Write Highlight SRT",
+        "type": "n8n-nodes-base.writeBinaryFile",
+        "typeVersion": 1,
+        "position": [
+          1080,
+          200
+        ]
+      },
+      {
+        "parameters": {
+          "method": "POST",
+          "url": "http://media_worker:9001/render_short",
+          "jsonParameters": true,
+          "options": {
+            "timeout": 300000
+          },
+          "bodyParametersJson": "{\"input_path\": \"={{$json.inputVideoPath}}\", \"srt_path\": \"={{$json.highlightSrtPath}}\", \"output_path\": \"={{$json.outputVideoPath}}\", \"start_sec\": \"={{$json.highlight.start_sec}}\", \"end_sec\": \"={{$json.highlight.end_sec}}\"}"
+        },
+        "id": "14",
+        "name": "FFmpeg Shorts",
+        "type": "n8n-nodes-base.httpRequest",
+        "typeVersion": 3,
+        "position": [
+          1300,
+          200
+        ]
+      },
+      {
+        "parameters": {
+          "method": "POST",
+          "url": "http://media_worker:9001/thumbnail",
+          "jsonParameters": true,
+          "options": {
+            "timeout": 120000
+          },
+          "bodyParametersJson": "{\"input_path\": \"={{$json.outputVideoPath}}\", \"output_path\": \"={{$json.thumbnailPath}}\", \"time_sec\": \"={{$json.thumbTimeSec}}\", \"text\": \"={{$json.highlight.hook_text}}\"}"
+        },
+        "id": "15",
+        "name": "Thumbnail",
+        "type": "n8n-nodes-base.httpRequest",
+        "typeVersion": 3,
+        "position": [
+          1520,
+          200
+        ]
+      },
+      {
+        "parameters": {
+          "filePath": "={{$json.outputVideoPath}}"
+        },
+        "id": "16",
+        "name": "Read Short",
+        "type": "n8n-nodes-base.readBinaryFile",
+        "typeVersion": 1,
+        "position": [
+          1740,
+          200
+        ]
+      },
+      {
+        "parameters": {
+          "functionCode": "const payload = {\n  runId: $json.runId,\n  bucket: $json.bucket,\n  key: $json.key,\n  highlight: $json.highlight,\n  outputVideoPath: $json.outputVideoPath,\n  thumbnailPath: $json.thumbnailPath,\n  youtube: {\n    videoId: $json.id || null\n  },\n  createdAt: new Date().toISOString()\n};\nreturn [{ json: { ...$json, metadata: JSON.stringify(payload, null, 2) } }];"
+        },
+        "id": "20",
+        "name": "Build Metadata",
+        "type": "n8n-nodes-base.function",
+        "typeVersion": 2,
+        "position": [
+          2600,
+          200
+        ]
+      },
+      {
+        "parameters": {
+          "operation": "toBinary",
+          "sourceKey": "metadata",
+          "destinationKey": "meta"
+        },
+        "id": "21",
+        "name": "Metadata To Binary",
+        "type": "n8n-nodes-base.moveBinaryData",
+        "typeVersion": 1,
+        "position": [
+          2800,
+          200
+        ]
+      },
+      {
+        "parameters": {
+          "fileName": "={{$json.metadataPath}}",
+          "dataPropertyName": "meta"
+        },
+        "id": "22",
+        "name": "Write Metadata",
+        "type": "n8n-nodes-base.writeBinaryFile",
+        "typeVersion": 1,
+        "position": [
+          3010,
+          200
+        ]
+      },
+      {
+        "parameters": {
+          "method": "POST",
+          "url": "={{$env.SQS_QUEUE_URL}}",
+          "authentication": "predefinedCredentialType",
+          "nodeCredentialType": "aws",
+          "sendQuery": false,
+          "specifyQuery": "keypair",
+          "response": {
+            "response": {
+              "responseFormat": "text",
+              "outputPropertyName": "data"
+            }
+          },
+          "sendBody": true,
+          "contentType": "form-urlencoded",
+          "specifyBody": "keypair",
+          "bodyParameters": {
+            "parameters": [
+              {
+                "name": "Action",
+                "value": "DeleteMessage"
+              },
+              {
+                "name": "ReceiptHandle",
+                "value": "={{$json.receiptHandle}}"
+              },
+              {
+                "name": "Version",
+                "value": "2012-11-05"
+              }
+            ]
+          }
+        },
+        "id": "23",
+        "name": "SQS Delete",
+        "type": "n8n-nodes-base.httpRequest",
+        "typeVersion": 4.4,
+        "position": [
+          3220,
+          200
+        ],
+        "credentials": {
+          "aws": {
+            "id": "HPkYmFKxxGtkpxjo",
+            "name": "AWS (IAM) account"
+          }
+        }
+      }
+    ],
+    "connections": {
+      "Schedule Trigger": {
+        "main": [
+          [
+            {
+              "node": "SQS Receive",
+              "type": "main",
+              "index": 0
+            }
+          ]
+        ]
+      },
+      "SQS Receive": {
+        "main": [
+          [
+            {
+              "node": "Parse SQS Message",
+              "type": "main",
+              "index": 0
+            }
+          ]
+        ]
+      },
+      "Parse SQS Message": {
+        "main": [
+          [
+            {
+              "node": "Prepare Paths",
+              "type": "main",
+              "index": 0
+            }
+          ]
+        ]
+      },
+      "Prepare Paths": {
+        "main": [
+          [
+            {
+              "node": "Download S3 Object",
+              "type": "main",
+              "index": 0
+            }
+          ]
+        ]
+      },
+      "Download S3 Object": {
+        "main": [
+          [
+            {
+              "node": "Write Input File",
+              "type": "main",
+              "index": 0
+            }
+          ]
+        ]
+      },
+      "Write Input File": {
+        "main": [
+          [
+            {
+              "node": "Read Input For STT",
+              "type": "main",
+              "index": 0
+            }
+          ]
+        ]
+      },
+      "Read Input For STT": {
+        "main": [
+          [
+            {
+              "node": "Whisper STT",
+              "type": "main",
+              "index": 0
+            }
+          ]
+        ]
+      },
+      "Whisper STT": {
+        "main": [
+          [
+            {
+              "node": "Full SRT To Binary",
+              "type": "main",
+              "index": 0
+            },
+            {
+              "node": "Select Highlights",
+              "type": "main",
+              "index": 0
+            }
+          ]
+        ]
+      },
+      "Full SRT To Binary": {
+        "main": [
+          [
+            {
+              "node": "Write Full SRT",
+              "type": "main",
+              "index": 0
+            }
+          ]
+        ]
+      },
+      "Select Highlights": {
+        "main": [
+          [
+            {
+              "node": "SRT To Binary",
+              "type": "main",
+              "index": 0
+            }
+          ]
+        ]
+      },
+      "SRT To Binary": {
+        "main": [
+          [
+            {
+              "node": "Write Highlight SRT",
+              "type": "main",
+              "index": 0
+            }
+          ]
+        ]
+      },
+      "Write Highlight SRT": {
+        "main": [
+          [
+            {
+              "node": "FFmpeg Shorts",
+              "type": "main",
+              "index": 0
+            }
+          ]
+        ]
+      },
+      "FFmpeg Shorts": {
+        "main": [
+          [
+            {
+              "node": "Thumbnail",
+              "type": "main",
+              "index": 0
+            }
+          ]
+        ]
+      },
+      "Thumbnail": {
+        "main": [
+          [
+            {
+              "node": "Read Short",
+              "type": "main",
+              "index": 0
+            }
+          ]
+        ]
+      },
+      "Read Short": {
+        "main": [
+          [
+            {
+              "node": "Build Metadata",
+              "type": "main",
+              "index": 0
+            }
+          ]
+        ]
+      },
+      "Build Metadata": {
+        "main": [
+          [
+            {
+              "node": "Metadata To Binary",
+              "type": "main",
+              "index": 0
+            }
+          ]
+        ]
+      },
+      "Metadata To Binary": {
+        "main": [
+          [
+            {
+              "node": "Write Metadata",
+              "type": "main",
+              "index": 0
+            }
+          ]
+        ]
+      },
+      "Write Metadata": {
+        "main": [
+          [
+            {
+              "node": "SQS Delete",
+              "type": "main",
+              "index": 0
+            }
+          ]
+        ]
+      }
+    },
+    "authors": "youngseon ahn",
+    "name": null,
+    "description": null,
+    "autosaved": false,
+    "workflowPublishHistory": [
+      {
+        "createdAt": "2026-02-09T04:21:15.488Z",
+        "id": 10,
+        "workflowId": "b0b0Z7gt3u1FflIX",
+        "versionId": "b002a00f-cef4-4aaf-a9d2-02bcaccbe704",
+        "event": "activated",
+        "userId": "624d748b-0328-41fc-92ec-b0ae618965a5"
+      }
+    ]
+  }
+}
