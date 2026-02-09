@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-PROFILE="personal"
+PROFILE="${AWS_PROFILE:-default}"
 REGION="${AWS_REGION:-ap-northeast-2}"
 BUCKET_NAME="${BUCKET_NAME:-}"
 QUEUE_NAME="${QUEUE_NAME:-}"
