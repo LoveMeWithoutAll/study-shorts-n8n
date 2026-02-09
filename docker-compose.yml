@@ -16,8 +16,8 @@ services:
       - N8N_RESTRICT_FILE_ACCESS_TO=/data;/runs
       - NODE_FUNCTION_ALLOW_BUILTIN=fs,path
       # AWS/SQS settings for the workflow
-      - AWS_REGION=ap-northeast-2
-      - SQS_QUEUE_URL=https://sqs.ap-northeast-2.amazonaws.com/092426855146/study-shorts-092426855146-ap-northeast-2-events
+      - AWS_REGION=${AWS_REGION:-ap-northeast-2}
+      - SQS_QUEUE_URL=${SQS_QUEUE_URL}
       # Optional: Set a basic auth or other auth if needed
       # - N8N_BASIC_AUTH_ACTIVE=true
       # - N8N_BASIC_AUTH_USER=admin
